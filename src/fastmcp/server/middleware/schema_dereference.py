@@ -65,29 +65,23 @@ def dereference_json_schema(schema: dict) -> dict:
         # Self-referencing detected, return original schema with $defs
         return schema
 
-    # Make a deep copy to work with
-    result = deepcopy(schema)
-
     # Keep original $defs for potential corner cases
     defs = deepcopy(schema.get("$defs", {}))
 
     # Track corner cases that require preserving $defs
-    corner_cases_detected = {
-        "circular_ref": False,
-        "ref_not_found": False,
-    }
+    corner_cases_detected = False
 
     # Step 2: Define resolution function that tracks visits globally and corner cases
-    def resolve_refs_in_value(value: Any, depth: int, visiting: set[str]) -> Any:
+    def resolve_refs_in_value(value: Any, visiting: set[str]) -> Any:
         """
         Recursively resolve $refs in a value.
         Args:
             value: The value to process
-            depth: Current depth in resolution
             visiting: Set of definitions currently being resolved (for cycle detection)
         Returns:
             Value with $refs resolved (or kept if corner cases occur)
         """
+        nonlocal corner_cases_detected
         if isinstance(value, dict):
             if "$ref" in value:
                 ref_path = value["$ref"]
@@ -99,7 +93,7 @@ def dereference_json_schema(schema: dict) -> dict:
                     # Check for circular reference
                     if def_name in visiting:
                         # Circular reference detected, keep the $ref
-                        corner_cases_detected["circular_ref"] = True
+                        corner_cases_detected = True
                         return value
 
                     if def_name in defs:
@@ -108,7 +102,7 @@ def dereference_json_schema(schema: dict) -> dict:
 
                         # Get the definition and resolve any refs within it
                         resolved = resolve_refs_in_value(
-                            deepcopy(defs[def_name]), depth + 1, visiting
+                            deepcopy(defs[def_name]), visiting
                         )
 
                         # Remove from visiting set
@@ -123,7 +117,7 @@ def dereference_json_schema(schema: dict) -> dict:
                         return resolved
                     else:
                         # Definition not found, keep the $ref
-                        corner_cases_detected["ref_not_found"] = True
+                        corner_cases_detected = True
                         return value
                 else:
                     # External ref or other type - keep as is
@@ -131,25 +125,26 @@ def dereference_json_schema(schema: dict) -> dict:
             else:
                 # Regular dict - process all values
                 return {
-                    key: resolve_refs_in_value(val, depth, visiting)
+                    key: resolve_refs_in_value(val, visiting)
                     for key, val in value.items()
                 }
         elif isinstance(value, list):
             # Process each item in the list
-            return [resolve_refs_in_value(item, depth, visiting) for item in value]
+            return [resolve_refs_in_value(item, visiting) for item in value]
         else:
             # Primitive value - return as is
             return value
 
     # Step 3: Process main schema properties with shared visiting set
+    result = deepcopy(schema)
     for key, value in result.items():
         if key != "$defs":
             # Each top-level property gets its own visiting set
             # This allows the same definition to be used in different contexts
-            result[key] = resolve_refs_in_value(value, 0, set())
+            result[key] = resolve_refs_in_value(value, set())
 
     # Step 4: Conditionally preserve $defs based on corner cases
-    if any(corner_cases_detected.values()):
+    if corner_cases_detected:
         # Corner case detected, preserve original $defs
         if "$defs" in schema:  # Only add if original schema had $defs
             result["$defs"] = defs
