@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "fastmcp": {
+      "type": "http",
+      "url": "https://gofastmcp.com/mcp"
+    },
+    "modelcontextprotocol": {
+      "type": "http",
+      "url": "https://modelcontextprotocol.io/mcp"
+    }
+  }
+}
